@@ -339,6 +339,18 @@ class MiGPT:
         )
 
     async def run_forever(self):
+        keyword_not_answer = [
+            "太有水平了",
+            "被问到了",
+            "被你问住了",
+            "待我去学习",
+            "等我学习",
+            "把我难住了",
+            "我要学习",
+            "要再学习",
+            "再去补补课",
+        ]
+
         async with ClientSession() as session:
             self.session = session
             await self.init_all_data(session)
@@ -380,23 +392,39 @@ class MiGPT:
                 # drop 帮我回答
                 query = re.sub(rf"^({'|'.join(self.config.keyword)})", "", query)
 
+                query += ",用少于50字回答"
                 print("-" * 20)
                 print("问题：" + query + "？")
                 if not self.chatbot.has_history():
                     query = f"{query}，{self.config.prompt}"
-                if self.config.mute_xiaoai:
-                    await self.stop_if_xiaoai_is_playing()
-                else:
-                    # waiting for xiaoai speaker done
-                    await asyncio.sleep(8)
-                await self.do_tts(f"正在问{self.chatbot.name}请耐心等待")
+                need_ask = False
                 try:
-                    print(
-                        "以下是小爱的回答: ",
-                        new_record.get("answers", [])[0].get("tts", {}).get("text"),
-                    )
+                    xiao_answer = new_record.get("answers", [])[0].get("tts", {}).get("text")
+                    print("以下是小爱的回答: ", xiao_answer)
+                
+                    found = False
+                    for kw in keyword_not_answer:
+                        if kw in xiao_answer:
+                            print(f'found {kw}')
+                            found = True
+                            break
+
+                    if found:
+                        need_ask = True
+
                 except IndexError:
                     print("小爱没回")
+                    need_ask = True
+
+                if not need_ask:
+                    wait_sec = int(len(xiao_answer) / 4)
+                    print(f"只需小爱的回答, {wait_sec} sec")
+                    continue
+
+                if self.config.mute_xiaoai:
+                    await self.stop_if_xiaoai_is_playing()
+                await self.do_tts(f"正在问{self.chatbot.name}")
+                
                 print(f"以下是 {self.chatbot.name} 的回答: ", end="")
                 try:
                     await self.tts.synthesize(query, self.ask_gpt(query))
