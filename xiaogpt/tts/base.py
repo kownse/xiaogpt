@@ -56,7 +56,7 @@ class TTS(abc.ABC):
         return is_playing
 
     @abc.abstractmethod
-    async def synthesize(self, query: str, text_stream: AsyncIterator[str]) -> None:
+    async def synthesize(self, query: str, text_stream: AsyncIterator[str]) -> str:
         """Synthesize speech from a stream of text."""
         raise NotImplementedError
 
@@ -94,7 +94,7 @@ class AudioFileTTS(TTS):
         """
         raise NotImplementedError
 
-    async def synthesize(self, query: str, text_stream: AsyncIterator[str]) -> None:
+    async def synthesize(self, query: str, text_stream: AsyncIterator[str]) -> str:
         queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue()
         finished = asyncio.Event()
 
@@ -127,6 +127,7 @@ class AudioFileTTS(TTS):
                 await self.mina_service.play_by_url(self.device_id, url)
                 await self.wait_for_duration(duration)
         await task
+        return 'empty'
 
     def _start_http_server(self):
         # set the port range

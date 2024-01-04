@@ -5,6 +5,7 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -31,7 +32,21 @@ from xiaogpt.utils import (
 
 EOF = object()
 
+class StringAsyncIterator(AsyncIterator[str]):
+    def __init__(self, text):
+        self.text = text
+        self.index = 0
 
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index < len(self.text):
+            result = self.text #[self.index]
+            self.index += len(self.text)
+            return result
+        else:
+            raise StopAsyncIteration
 class MiGPT:
     def __init__(self, config: Config):
         self.config = config
@@ -51,6 +66,9 @@ class MiGPT:
         self.log.setLevel(logging.DEBUG if config.verbose else logging.INFO)
         self.log.addHandler(RichHandler())
         self.log.debug(config)
+        self.cached_answer = {}
+        self.cached_path = 'cache.txt'
+        self.keyword_not_answer = []
 
     async def poll_latest_ask(self):
         async with ClientSession() as session:
@@ -337,19 +355,38 @@ class MiGPT:
             self.config.mi_did,
             f"{self.config.wakeup_command} {WAKEUP_KEYWORD} 0",
         )
+    
+    def cache_answer(self, query, gpt_answer):
+        self.cached_answer[query] = gpt_answer
+        with open(self.cached_path, 'a+') as fo:
+            fo.write(f'{query}#{gpt_answer}\n')
+
+    def load_cache(self):
+        if os.path.exists(self.cached_path):
+            with open(self.cached_path, 'r') as fi:
+                for line in fi:
+                    line = line.strip()
+                    question, answer = line.split('#')
+                    self.cached_answer[question] = answer
+        print('cache loaded')
+
+    def load_keyword_not_answer(self):
+        self.keyword_not_answer = []
+        with open('no_answer.txt', 'r') as fi:
+            for line in fi:
+                self.keyword_not_answer.append(line.strip())
+        print('keyword_not_answer loaded')
+
+    def check_ask_gpt_keywords(self, xiao_answer):
+        for kw in self.keyword_not_answer:
+            if kw in xiao_answer:
+                print(f'found {kw}')
+                return True
+        return False
 
     async def run_forever(self):
-        keyword_not_answer = [
-            "太有水平了",
-            "被问到了",
-            "被你问住了",
-            "待我去学习",
-            "等我学习",
-            "把我难住了",
-            "我要学习",
-            "要再学习",
-            "再去补补课",
-        ]
+        self.load_keyword_not_answer()
+        self.load_cache()
 
         async with ClientSession() as session:
             self.session = session
@@ -392,26 +429,16 @@ class MiGPT:
                 # drop 帮我回答
                 query = re.sub(rf"^({'|'.join(self.config.keyword)})", "", query)
 
-                query += ",用少于50字回答"
+                query_better = query + ",用少于50字回答"
                 print("-" * 20)
-                print("问题：" + query + "？")
+                print("问题：" + query_better + "？")
                 if not self.chatbot.has_history():
-                    query = f"{query}，{self.config.prompt}"
+                    query_better = f"{query_better}，{self.config.prompt}"
                 need_ask = False
                 try:
                     xiao_answer = new_record.get("answers", [])[0].get("tts", {}).get("text")
                     print("以下是小爱的回答: ", xiao_answer)
-                
-                    found = False
-                    for kw in keyword_not_answer:
-                        if kw in xiao_answer:
-                            print(f'found {kw}')
-                            found = True
-                            break
-
-                    if found:
-                        need_ask = True
-
+                    need_ask = self.check_ask_gpt_keywords(xiao_answer)
                 except IndexError:
                     print("小爱没回")
                     need_ask = True
@@ -424,14 +451,22 @@ class MiGPT:
                 if self.config.mute_xiaoai:
                     await self.stop_if_xiaoai_is_playing()
                 await self.do_tts(f"正在问{self.chatbot.name}")
-                
+
                 print(f"以下是 {self.chatbot.name} 的回答: ", end="")
-                try:
-                    await self.tts.synthesize(query, self.ask_gpt(query))
-                except Exception as e:
-                    print(f"{self.chatbot.name} 回答出错 {str(e)}")
+                if query in self.cached_answer:
+                    gpt_answer = self.cached_answer[query]
+                    
+                    print(f'use cached answer:{gpt_answer}')
+                    gpt_answer = StringAsyncIterator(gpt_answer)
+                    await self.tts.synthesize(query, gpt_answer)
                 else:
-                    print("回答完毕")
+                    try:
+                        gpt_answer = await self.tts.synthesize(query, self.ask_gpt(query))
+                        self.cache_answer(query, gpt_answer)
+                    except Exception as e:
+                        print(f"{self.chatbot.name} 回答出错 {str(e)}")
+                    else:
+                        print("回答完毕")
                 if self.in_conversation:
                     print(f"继续对话, 或用`{self.config.end_conversation}`结束对话")
                     await self.wakeup_xiaoai()
