@@ -357,9 +357,10 @@ class MiGPT:
         )
     
     def cache_answer(self, query, gpt_answer):
+        # print('cache answer')
         self.cached_answer[query] = gpt_answer
         with open(self.cached_path, 'a+') as fo:
-            fo.write(f'{query}#{gpt_answer}\n')
+            fo.write(f'{query}#{gpt_answer}\r\n')
 
     def load_cache(self):
         if os.path.exists(self.cached_path):
@@ -429,7 +430,7 @@ class MiGPT:
                 # drop 帮我回答
                 query = re.sub(rf"^({'|'.join(self.config.keyword)})", "", query)
 
-                query_better = query + ",用少于50字回答"
+                query_better = query
                 print("-" * 20)
                 print("问题：" + query_better + "？")
                 if not self.chatbot.has_history():
@@ -461,7 +462,8 @@ class MiGPT:
                     await self.tts.synthesize(query, gpt_answer)
                 else:
                     try:
-                        gpt_answer = await self.tts.synthesize(query, self.ask_gpt(query))
+                        print(f'query_better={query_better}')
+                        gpt_answer = await self.tts.synthesize(query_better, self.ask_gpt(query_better))
                         self.cache_answer(query, gpt_answer)
                     except Exception as e:
                         print(f"{self.chatbot.name} 回答出错 {str(e)}")

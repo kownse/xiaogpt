@@ -40,11 +40,15 @@ class TTS(abc.ABC):
 
     async def wait_for_duration(self, duration: float) -> None:
         """Wait for the specified duration."""
+        print(f'duration={duration}')
         await asyncio.sleep(duration)
-        while True:
-            if not await self.get_if_xiaoai_is_playing():
-                break
-            await asyncio.sleep(1)
+        print('sleep finished')
+        #while True:
+        #    if not await self.get_if_xiaoai_is_playing():
+        #        print('break')
+        #        break
+        #    print('sleep 1 sec')
+        #    await asyncio.sleep(1)
 
     async def get_if_xiaoai_is_playing(self):
         playing_info = await self.mina_service.player_get_status(self.device_id)
